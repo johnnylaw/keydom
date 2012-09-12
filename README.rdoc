@@ -1,0 +1,92 @@
+= Keydom
+
+Keydom allows you to effortlessly use UUID's as primary keys (as far as ActiveRecord is concerned) while maintaining the good INSERT performance from using serial keys.  It also provides the opportunity to actually easily create a primary key in the database itself, although this is not recommended for tables that will become large.
+
+Currently only PostgreSQL adapter is supported, because it provides a "uuid" column type that stores UUID's compliant with RFC 4122 as 16-byte binary strings without additional casting.  Currently this gem requires you to use PostgreSQL for all environments (including development and test), as the SQLite adapter will not recognize the "uuid" column type.  This may be fixed in future versions, although challenges arise concerning the creation of the schema.rb file.
+
+Future versions will provide support for the MySQL2 adapter as well.
+
+The advantages of using Keydom to key your tables are:
+* Migrations of several databases' data into one are collision-free, unlike serial-integer-keyed tables, which will require fancy scripting to combine
+* URL's containing the record's key will not give away information about the size of your database
+* Resources being created by a trusted API client can generate the primary key of the object that will be used by all systems, preventing multiple instances of the same resource in your database
+
+== Installation
+
+Add the following to your Gemfile:
+
+  gem 'keydom'
+
+== API Examples
+
+Keydom adds two methods to migrations, but you are urged to use them only for tables that will remain relatively small:
+
+* add_primary_key(table, column)
+* remove_primary_key(table)
+
+You can enjoy the use of the "uuid" column as primary key as in the following example:
+
+  class Person < ActiveRecord::Base
+    uses_uuid_primary_key
+  end
+
+In your migration you can then do the following:
+
+  class CreatePeople < ActiveRecord::Migration
+    def change
+      create_table :people, id: false do |t|
+        t.uuid :uuid, unique: true
+        ...
+        t.timestamps
+      end
+    end
+  end
+  
+This will create a table that has no primary key but instead a unique index on the "uuid" column.  This is recommended, as it takes advantage of the UUID as [effective] primary key without causing PostgreSQL to repaginate all entries as would happen if the randomly generated UUID's were treated as primary keys by the database.
+
+== Adding primary keys to the database
+
+If, however, the table size is expected to remain small and you wish to have UUID as the primary key at the database level, you may add the following to your migration:
+
+  add_primary_key :people, :uuid
+  
+It is also not necessary to eliminate the "id" column as in the above example migration, but doing so will facilitate the migration of several databases into one should you choose to use "uuid" as the basis for foreign keys in other tables, such as:
+
+  class Person < ActiveRecord::Base
+    uses_uuid_primary_key
+    
+    has_many :things, foreign_key: :person_uuid
+  end
+  
+  class Things < ActiveRecord::Base
+    uses_uuid_primary_key
+    
+    belongs_to :person, foreign_key: :person_uuid
+  end
+
+and a corresponding migration:
+
+class CreateThings < ActiveRecord::Migration
+  def change
+    create_table :things, id: false do |t|
+      t.uuid :uuid, unique: true
+      t.uuid :person_uuid
+      ...
+      t.timestamps
+    end
+  end
+end
+
+== Default foreign key for associations
+
+In the very near future it will not be necessary to specify the foreign keys in the associations, such as:
+
+  class Person
+    has_many :things, foreign_key: :person_uuid
+  end
+  
+  class Thing
+    belongs_to :person, foreign_key: :person_uuid
+  end
+  
+because Keydom will actually assume that the foreign_key name will be based on the primary key of the model that is doing the "having", even if that key is not called "id".
